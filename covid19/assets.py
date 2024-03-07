@@ -139,3 +139,30 @@ def pull_hospital_admissions() -> None:
 
     # write data to database or elsewhere
     df.to_parquet("model/f_daily_hospital_admissions.parquet.gz", index=False)
+
+@asset(deps=[generate_calendar, generate_countries])
+def pull_excess_mortality() -> None:
+    """
+    Get the historical data of COVID-19 excess mortality by country.
+    """
+
+    # read data from api
+    url = "https://covid.ourworldindata.org/data/internal/megafile--excess-mortality.json"
+    df = pd.read_json(url)
+
+    # rename the country column name
+    df.rename(columns={"location":"country"}, inplace=True)
+
+    # read dimension tables
+    df_date = pd.read_parquet("model/d_date.parquet.gz")
+    df_country = pd.read_parquet("model/d_country.parquet.gz")
+
+    # inner join to make sure foreign keys
+    df = (
+        df
+        .merge(df_date[["date"]])
+        .merge(df_country[["country"]])
+    )
+
+    # write data to database or elsewhere
+    df.to_parquet("model/f_daily_excess_mortality.parquet.gz", index=False)
