@@ -1,5 +1,8 @@
 .venv/
+.env
 
 tmp*/
 
 model/
+
+__pycache__/
