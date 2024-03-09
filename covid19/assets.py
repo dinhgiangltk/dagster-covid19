@@ -1,40 +1,41 @@
 import pandas as pd
-import sqlalchemy as sa
+from sqlalchemy import create_engine
 import os
 
 from urllib.parse import quote_plus
 from dagster import asset
 
-DRIVER = "ODBC Driver 17 for SQL Server"
-SERVER_NAME = "VHLC-GIANGTD13"
-DATABASE_NAME = "cid"
-USER_NAME = "cid-local"
-USER_PASSWORD = "654321"
+DRIVER = os.getenv("DRIVER")
+SERVER = os.getenv("SERVER")
+DATABASE = os.getenv("DATABASE")
+USER = os.getenv("USER")
+PASSWORD = os.getenv("PASSWORD")
 
 connection_string = (
     f'Driver={DRIVER};'
-    f'SERVER={SERVER_NAME};'
-    f'Database={DATABASE_NAME};'
-    f'UID={USER_NAME};'
-    f'PWD={USER_PASSWORD};'
+    f'SERVER={SERVER};'
+    f'Database={DATABASE};'
+    f'UID={USER};'
+    f'PWD={PASSWORD};'
     'Trusted_Connection=no;'
 )
 
 connection_uri = f"mssql+pyodbc:///?odbc_connect={quote_plus(connection_string)}"
-engine = sa.create_engine(connection_uri, fast_executemany=True)
+engine = create_engine(connection_uri, fast_executemany=True)
 
-def read_table_from_db(
-        query_string:str
+def db_run_query(
+        query_string:str,
+        return_table = True
     ):
     """
     Read data from the database, and assign the output as a dataframe.
     """
-    df = pd.read_sql( 
-        sql=query_string, 
-        con=engine
-    )
-
-    return df
+    if return_table:
+        df = pd.read_sql( 
+            sql=query_string, 
+            con=engine
+        )
+        return df
 
 def write_data_to_db(
         df:pd.DataFrame, 
@@ -53,7 +54,6 @@ def write_data_to_db(
         if_exists=insert_type, 
         chunksize=chunks, 
         index=False
-
     )
     return df
 
@@ -66,6 +66,15 @@ def pull_cases() -> None:
     # read data from api
     url = "https://covid.ourworldindata.org/data/internal/megafile--cases-tests.json"
     df = pd.read_json(url)
+
+    # create a schema if not exists
+    query_str = """
+        if (schema_id('fact') is null)
+        begin
+            exec('create schema [fact]')
+        end
+    """
+    db_run_query(query_str, return_table=False)
 
     # rename the country column name
     df.rename(columns={"location":"country"}, inplace=True)
@@ -80,12 +89,21 @@ def generate_calendar() -> None:
     """
 
     # get the unique dates
-    df = read_table_from_db("select distinct [date] from fact.daily_cases")
+    df = db_run_query("select distinct [date] from fact.daily_cases")
 
     # add more attributes
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
     df["day"] = df["date"].dt.day
+
+    # create a schema if not exists
+    query_str = """
+        if (schema_id('dim') is null)
+        begin
+            exec('create schema [dim]')
+        end
+    """
+    db_run_query(query_str, return_table=False)
 
     # write data to database
     write_data_to_db(df=df, table_name="calendar", schema="dim")
@@ -97,7 +115,16 @@ def generate_countries() -> None:
     """
 
     # get the unique countries
-    df = read_table_from_db("select distinct [country] from fact.daily_cases")
+    df = db_run_query("select distinct [country] from fact.daily_cases")
+
+    # create a schema if not exists
+    query_str = """
+        if (schema_id('dim') is null)
+        begin
+            exec('create schema [dim]')
+        end
+    """
+    db_run_query(query_str, return_table=False)
 
     # write data to database
     write_data_to_db(df=df, table_name="country", schema="dim")
@@ -119,8 +146,8 @@ def pull_deaths() -> None:
     df.rename(columns={"location":"country"}, inplace=True)
 
     # read dimension tables
-    df_date = read_table_from_db("select distinct [date] from dim.calendar")
-    df_country = read_table_from_db("select distinct [country] from dim.country")
+    df_date = db_run_query("select distinct [date] from dim.calendar")
+    df_country = db_run_query("select distinct [country] from dim.country")
 
     # inner join to make sure foreign keys
     df = (
@@ -146,8 +173,8 @@ def pull_vaccinations() -> None:
     df.rename(columns={"location":"country"}, inplace=True)
 
     # read dimension tables
-    df_date = read_table_from_db("select distinct [date] from dim.calendar")
-    df_country = read_table_from_db("select distinct [country] from dim.country")
+    df_date = db_run_query("select distinct [date] from dim.calendar")
+    df_country = db_run_query("select distinct [country] from dim.country")
 
     # inner join to make sure foreign keys
     df = (
@@ -173,8 +200,8 @@ def pull_hospital_admissions() -> None:
     df.rename(columns={"location":"country"}, inplace=True)
 
     # read dimension tables
-    df_date = read_table_from_db("select distinct [date] from dim.calendar")
-    df_country = read_table_from_db("select distinct [country] from dim.country")
+    df_date = db_run_query("select distinct [date] from dim.calendar")
+    df_country = db_run_query("select distinct [country] from dim.country")
 
     # inner join to make sure foreign keys
     df = (
@@ -200,8 +227,8 @@ def pull_excess_mortality() -> None:
     df.rename(columns={"location":"country"}, inplace=True)
 
     # read dimension tables
-    df_date = read_table_from_db("select distinct [date] from dim.calendar")
-    df_country = read_table_from_db("select distinct [country] from dim.country")
+    df_date = db_run_query("select distinct [date] from dim.calendar")
+    df_country = db_run_query("select distinct [country] from dim.country")
 
     # inner join to make sure foreign keys
     df = (
