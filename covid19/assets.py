@@ -1,7 +1,8 @@
 import pandas as pd
-from sqlalchemy import create_engine
 import os
 
+from sqlalchemy import create_engine
+from sqlalchemy.schema import CreateSchema
 from urllib.parse import quote_plus
 from dagster import asset
 
@@ -22,6 +23,11 @@ connection_string = (
 
 connection_uri = f"mssql+pyodbc:///?odbc_connect={quote_plus(connection_string)}"
 engine = create_engine(connection_uri, fast_executemany=True)
+conn = engine.connect()
+
+def db_create_schema(schema_name:str):
+    if schema_name not in conn.dialect.get_schema_names(conn):
+        conn.execute(CreateSchema(schema_name))
 
 def db_run_query(
         query_string:str,
@@ -67,17 +73,11 @@ def pull_cases() -> None:
     url = "https://covid.ourworldindata.org/data/internal/megafile--cases-tests.json"
     df = pd.read_json(url)
 
-    # create a schema if not exists
-    query_str = """
-        if (schema_id('fact') is null)
-        begin
-            exec('create schema [fact]')
-        end
-    """
-    db_run_query(query_str, return_table=False)
-
     # rename the country column name
     df.rename(columns={"location":"country"}, inplace=True)
+
+    # create a schema if not exists
+    db_create_schema("fact")
 
     # write data to database
     write_data_to_db(df=df, table_name="daily_cases", schema="fact")
@@ -97,13 +97,7 @@ def generate_calendar() -> None:
     df["day"] = df["date"].dt.day
 
     # create a schema if not exists
-    query_str = """
-        if (schema_id('dim') is null)
-        begin
-            exec('create schema [dim]')
-        end
-    """
-    db_run_query(query_str, return_table=False)
+    db_create_schema("dim")
 
     # write data to database
     write_data_to_db(df=df, table_name="calendar", schema="dim")
@@ -118,13 +112,7 @@ def generate_countries() -> None:
     df = db_run_query("select distinct [country] from fact.daily_cases")
 
     # create a schema if not exists
-    query_str = """
-        if (schema_id('dim') is null)
-        begin
-            exec('create schema [dim]')
-        end
-    """
-    db_run_query(query_str, return_table=False)
+    db_create_schema("dim")
 
     # write data to database
     write_data_to_db(df=df, table_name="country", schema="dim")
